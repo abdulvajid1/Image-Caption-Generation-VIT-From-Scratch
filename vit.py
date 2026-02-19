@@ -19,7 +19,7 @@ class ImagePatchEmbedding(nn.Module):
         super().__init__()
         self.args = args
         self.pos_emb = PositionalEmbedding(args)
-        self.net = nn.Conv2d(in_channels=args.img_channels, out_channels=args.latent_dim, kernel_size=args.patch_size, stride=args.patch_size, padding=0)
+        self.net = nn.Conv2d(in_channels=args.num_patches, out_channels=args.latent_dim, kernel_size=args.patch_size, stride=args.patch_size, padding=0)
         
     def forward(self, img: torch.Tensor):
         print()
@@ -27,6 +27,20 @@ class ImagePatchEmbedding(nn.Module):
         b, ch, _, _= x.size()
         x = x.view(b, ch, -1).permute(0, 2, 1) # (b, pathces, latent_dim)
         return self.pos_emb(x)
+    
+class TextEmbedding(nn.Module):
+    def __init__(self, args):
+        super().__init__()
+        self.max_tokens = args.max_tokens
+        self.embed = nn.Embedding(num_embeddings=args.num_token, embedding_dim=args.latent_dim)
+        self.pos_embed = nn.Embedding(num_embeddings=args.context_len, embedding_dim=args.latent_dim)
+    
+    def forward(self, tokens: torch.Tensor):
+        x = self.embed(tokens)
+        seq_len = x.shape[1]
+        return x + self.pos_embed(torch.arange(seq_len))[None, :seq_len, :]
+        
+        
     
 class LayerNorm(nn.Module): # Or RMS Norm
     def __init__(self, args):
@@ -82,7 +96,7 @@ class MLPLayer(nn.Module):
         return self.ff(x)
     
     
-class DecoderBlock(nn.Module):
+class VITBlock(nn.Module):
     def __init__(self, args):
         super().__init__()
         self.args = args
@@ -98,6 +112,39 @@ class DecoderBlock(nn.Module):
         x_norm = self.norm2(x)
         x_mlp = self.mlp(x_norm)
         return x + x_mlp
+
+class VITHead(nn.Module):
+    def __init__(self, args):
+        super().__init__()
+        self.final_layer = nn.Linear(in_features=args.latent_dim, out_features=args.num_tokens)
+        
+    def forward(self, x):
+        return self.final_layer(x)
+        
+class VIT(nn.Module):
+    def __init__(self, args):
+        super().__init__()
+        self.image_input_layer = ImagePatchEmbedding(args)
+        self.text_input_layer = TextEmbedding(args)
+        self.vitblocks = nn.Sequential(*[VITBlock(args) for _ in range(args.num_layers)])
+        self.output_layer = VITHead(args)
+    
+    def forward(self, x_img, target:torch.Tensor):
+        x = self.image_input_layer(x)
+        if target:
+            text_embeddings = self.text_input_layer(target)
+            x = torch.concat(x, text_embeddings, dim=1)
+        
+        x = self.vitblocks(x)
+        final_out = self.output_layer(x)
+        return final_out
+            
+            
+        x = self.input_layer(x)
+        x = self.vitblocks(x)
+        return self.output_layer(x)
+        
+        
         
         
     

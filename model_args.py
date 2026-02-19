@@ -8,4 +8,6 @@ class Arguments:
     img_channels: int = 3
     eps: float = 1e-6
     num_heads: int = 8
+    context_len: int = 128
+    num_tokens: int = 1000
     
