@@ -124,6 +124,7 @@ class VITHead(nn.Module):
 class VIT(nn.Module):
     def __init__(self, args):
         super().__init__()
+        self.args = args
         self.image_input_layer = ImagePatchEmbedding(args)
         self.text_input_layer = TextEmbedding(args)
         self.vitblocks = nn.Sequential(*[VITBlock(args) for _ in range(args.num_layers)])
@@ -131,28 +132,46 @@ class VIT(nn.Module):
     
     def forward(self, x_img, target:torch.Tensor):
         x = self.image_input_layer(x)
+        loss = None
         if target:
             text_embeddings = self.text_input_layer(target)
             x = torch.concat(x, text_embeddings, dim=1)
         
         x = self.vitblocks(x)
         final_out = self.output_layer(x)
-        return final_out
+        if target:
+            loss = F.cross_entropy(final_out[:, self.args.patch_len+1:, :], target)
+        return final_out, loss
+    
+    def vit_pass(self, x):
+        x = self.vitblocks(x)
+        return self.output_layer(x)
+        
+        
+    
+    def generate(self, img, max_len=None):
+        if not max_len:
+            max_len = self.args.context_len
+        batch_size = img.shape[0]
+        text_tokens = torch.ones(batch_size, 1)
+        img_embed = self.image_input_layer(img)
+        curr_input = img_embed
+        
+        for _ in range(max_len):
+            out = self.vit_pass(curr_input)
+            last_layer_out = out[:, -1, :]
+            token_score = F.softmax(last_layer_out, dim=-1)
+            next_tok_indices = torch.argmax(token_score, dim=-1, keepdim=True)
+            text_tokens = torch.cat(text_tokens, next_tok_indices, dim=-1)
+            text_embeds = self.text_input_layer(text_tokens)
+            curr_input = torch.concat(img_embed, text_embeds, dim=1)
+            
             
             
         x = self.input_layer(x)
         x = self.vitblocks(x)
         return self.output_layer(x)
         
-        
-        
-        
-    
-        
-        
-        
-    
-
     
     
     
