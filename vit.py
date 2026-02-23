@@ -130,17 +130,17 @@ class VIT(nn.Module):
         self.vitblocks = nn.Sequential(*[VITBlock(args) for _ in range(args.num_layers)])
         self.output_layer = VITHead(args)
     
-    def forward(self, x_img, target:torch.Tensor):
+    def forward(self, x_img, target_text_tokens:torch.Tensor):
         x = self.image_input_layer(x)
         loss = None
-        if target:
-            text_embeddings = self.text_input_layer(target)
+        if target_text_tokens:
+            text_embeddings = self.text_input_layer(target_text_tokens)
             x = torch.concat(x, text_embeddings, dim=1)
         
         x = self.vitblocks(x)
         final_out = self.output_layer(x)
-        if target:
-            loss = F.cross_entropy(final_out[:, self.args.patch_len+1:, :], target)
+        if target_text_tokens:
+            loss = F.cross_entropy(final_out[:, self.args.patch_len+1:, :], target_text_tokens)
         return final_out, loss
     
     def vit_pass(self, x):
@@ -148,21 +148,23 @@ class VIT(nn.Module):
         return self.output_layer(x)
         
         
-    
+    @torch.no_grad()
     def generate(self, img, max_len=None):
         if not max_len:
             max_len = self.args.context_len
         batch_size = img.shape[0]
-        text_tokens = torch.ones(batch_size, 1)
         img_embed = self.image_input_layer(img)
         curr_input = img_embed
         
-        for _ in range(max_len):
+        for i, _ in enumerate(range(max_len)):
             out = self.vit_pass(curr_input)
             last_layer_out = out[:, -1, :]
             token_score = F.softmax(last_layer_out, dim=-1)
             next_tok_indices = torch.argmax(token_score, dim=-1, keepdim=True)
-            text_tokens = torch.cat(text_tokens, next_tok_indices, dim=-1)
+            if i == 0:
+                text_tokens = torch.ones(batch_size, 1) * next_tok_indices
+            else: 
+                text_tokens = torch.cat(text_tokens, next_tok_indices, dim=-1)
             text_embeds = self.text_input_layer(text_tokens)
             curr_input = torch.concat(img_embed, text_embeds, dim=1)
             
@@ -172,7 +174,8 @@ class VIT(nn.Module):
         x = self.vitblocks(x)
         return self.output_layer(x)
         
-    
+# TODO : add attention correctly
+# TODO : may need to add seperate token
     
     
 
