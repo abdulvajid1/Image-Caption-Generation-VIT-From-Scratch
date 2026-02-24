@@ -50,7 +50,7 @@ def transform(img_path):
     ])
     
     
-    img = Image.open(img_path)
+    img = Image.open(img_path).convert('RGB')
     transformed_img = transformer(img)
     
     return transformed_img

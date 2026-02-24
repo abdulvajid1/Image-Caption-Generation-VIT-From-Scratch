@@ -8,10 +8,9 @@ class PositionalEmbedding(nn.Module):
     def __init__(self, args):
         super().__init__()
         self.num_patches = (args.img_size//args.patch_size)**2
-        self.positions = nn.Embedding(self.context_len, args.latent_dim)
+        self.positions = nn.Embedding(args.context_len, args.latent_dim)
     def forward(self, x):
-        pos = self.positions(torch.arange(0, self.num_patches-1).to(torch.int))[None, :, :]
-        print("pos embedding shape", pos.shape, "and shape of patches embedding", x.shape)
+        pos = self.positions(torch.arange(0, self.num_patches).to(torch.long))[None, :, :]
         return x + pos
 
 class ImagePatchEmbedding(nn.Module):
@@ -19,10 +18,9 @@ class ImagePatchEmbedding(nn.Module):
         super().__init__()
         self.args = args
         self.pos_emb = PositionalEmbedding(args)
-        self.net = nn.Conv2d(in_channels=args.num_patches, out_channels=args.latent_dim, kernel_size=args.patch_size, stride=args.patch_size, padding=0)
+        self.net = nn.Conv2d(in_channels=args.img_channels, out_channels=args.latent_dim, kernel_size=args.patch_size, stride=args.patch_size, padding=0)
         
     def forward(self, img: torch.Tensor):
-        print()
         x = self.net(img) # shape: (b, channels (latent), patch_size(2), patch_size(2))
         b, ch, _, _= x.size()
         x = x.view(b, ch, -1).permute(0, 2, 1) # (b, pathces, latent_dim)
@@ -31,8 +29,8 @@ class ImagePatchEmbedding(nn.Module):
 class TextEmbedding(nn.Module):
     def __init__(self, args):
         super().__init__()
-        self.max_tokens = args.max_tokens
-        self.embed = nn.Embedding(num_embeddings=args.num_token, embedding_dim=args.latent_dim)
+        self.max_tokens = args.context_len
+        self.embed = nn.Embedding(num_embeddings=args.num_tokens, embedding_dim=args.latent_dim)
         self.pos_embed = nn.Embedding(num_embeddings=args.context_len, embedding_dim=args.latent_dim)
     
     def forward(self, tokens: torch.Tensor):
@@ -129,23 +127,27 @@ class VIT(nn.Module):
         self.text_input_layer = TextEmbedding(args)
         self.vitblocks = nn.Sequential(*[VITBlock(args) for _ in range(args.num_layers)])
         self.output_layer = VITHead(args)
+        self.patch_len = (args.img_size // args.patch_size)**2
     
-    def forward(self, x_img, target_text_tokens:torch.Tensor):
-        x = self.image_input_layer(x)
+    def forward(self, x_img, target_text_tokens:torch.Tensor=None):
+        x = self.image_input_layer(x_img)
         loss = None
-        if target_text_tokens:
+        if target_text_tokens != None:
             text_embeddings = self.text_input_layer(target_text_tokens)
-            x = torch.concat(x, text_embeddings, dim=1)
+            x = torch.concat((x, text_embeddings), dim=1)
         
         x = self.vitblocks(x)
         final_out = self.output_layer(x)
-        if target_text_tokens:
-            loss = F.cross_entropy(final_out[:, self.args.patch_len+1:, :], target_text_tokens)
+        if target_text_tokens != None:
+            loss = F.cross_entropy(final_out[:, self.patch_len:, :].reshape(-1, self.args.num_tokens), target_text_tokens.view(-1))
         return final_out, loss
     
     def vit_pass(self, x):
         x = self.vitblocks(x)
-        return self.output_layer(x)
+        
+        out = self.output_layer(x)
+       
+        return out
         
         
     @torch.no_grad()
@@ -181,8 +183,7 @@ class VIT(nn.Module):
 
 if __name__ == "__main__":
     args = Arguments()
-    pos = PositionalEmbedding(args)
-    img_patch = ImagePatchEmbedding(args)
+    Vit = VIT(args=args)
     x = torch.rand(5, args.img_channels, args.img_size, args.img_size)
-    print(img_patch(x).shape)
+    print(Vit(x))
         

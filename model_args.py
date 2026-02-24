@@ -9,8 +9,14 @@ class Arguments:
     eps: float = 1e-6
     num_heads: int = 8
     context_len: int = 128
-    num_tokens: int = 1000
-    batch_size: int = 8
+    batch_size: int = 4
     num_workers: int = 0
     pin_memory: bool = False
-    
+    load: bool = False
+    context_len: int = 32
+    num_patches: int = 16
+    num_tokens: int = 30522
+    num_layers: int = 8
+    latent_mull: int = 2
+    learning_rate: int = 1e-4
+    num_epochs: int = 20
