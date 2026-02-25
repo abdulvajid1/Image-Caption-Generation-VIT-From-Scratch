@@ -12,35 +12,38 @@ from utils import load_model
 
 from loguru import logger
 
+device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
+
 def generate_random(model, eval_path="archive/val2017/val2017"):
     val_imgs = list(Path(eval_path).glob("*.jpg"))
     rand_int = random.randint(0, 1000)
     rand_img_path = val_imgs[rand_int]
+    logger.info(f"Testing with random image {rand_img_path}")
     img = transform(rand_img_path)
     model.eval()
     print(model.generate(img))
-    
-    pass
+    return 0
+
 def train(model: torch.nn.Module, optimizer: torch.optim.AdamW, dataloader: torch.utils.data.DataLoader, epoch_num: int, global_step):
     progress_bar = tqdm.tqdm(dataloader)
-    
-    for step, (img, text_tokens) in enumerate(dataloader):
+    model.train()
+    for step, (img, text_tokens) in enumerate(progress_bar):
+        img = img.to(device)
+        text_tokens = text_tokens.to(device)
         _, loss = model(img, text_tokens)
         optimizer.zero_grad()
         loss.backward()
         optimizer.step()
         
-        if epoch_num+1 % 15 == 0:
+        if (step+1) % 15 == 0:
             logger.info("Generating Random Sentence")
+            model.eval()
             generate_random(model=model)
+            model.train()
         
         progress_bar.set_postfix({
             "loss" : loss.item()
             })
-        
-        
-        
-    
 
 def main():
     args = Arguments()

@@ -3,6 +3,8 @@ import torch.nn as nn
 import torch.nn.functional as F
 from model_args import Arguments
 import math
+from tokenizer import tokenizer
+
 
 class PositionalEmbedding(nn.Module):
     def __init__(self, args):
@@ -10,7 +12,7 @@ class PositionalEmbedding(nn.Module):
         self.num_patches = (args.img_size//args.patch_size)**2
         self.positions = nn.Embedding(args.context_len, args.latent_dim)
     def forward(self, x):
-        pos = self.positions(torch.arange(0, self.num_patches).to(torch.long))[None, :, :]
+        pos = self.positions(torch.arange(0, self.num_patches, device=x.device).to(torch.int))[None, :, :]
         return x + pos
 
 class ImagePatchEmbedding(nn.Module):
@@ -36,7 +38,7 @@ class TextEmbedding(nn.Module):
     def forward(self, tokens: torch.Tensor):
         x = self.embed(tokens)
         seq_len = x.shape[1]
-        return x + self.pos_embed(torch.arange(seq_len))[None, :seq_len, :]
+        return x + self.pos_embed(torch.arange(seq_len, device=x.device))[None, :seq_len, :]
         
         
     
@@ -56,6 +58,9 @@ class MultiHeadAttention(nn.Module):
     def __init__(self, args):
         super().__init__()
         self.args = args
+        self.num_patches = (self.args.img_size//self.args.patch_size)**2
+        mask = get_mask_val(self.num_patches, args.context_len)
+        self.register_buffer('mask', mask)
         assert args.latent_dim % args.num_heads == 0, "latent dim should be divisible with num heads"
         self.q_proj = nn.Linear(in_features=args.latent_dim, out_features=args.latent_dim, bias=False)
         self.k_proj = nn.Linear(in_features=args.latent_dim, out_features=args.latent_dim, bias=False)
@@ -64,6 +69,7 @@ class MultiHeadAttention(nn.Module):
     
     def forward(self, x: torch.Tensor):
         num_batch, seq_len, _ = x.size()
+        text_token_len = seq_len - self.num_patches
         x_q = self.q_proj(x) # (b, seq, latent_dim)
         x_k = self.k_proj(x)
         x_v = self.v_proj(x)
@@ -74,6 +80,11 @@ class MultiHeadAttention(nn.Module):
         x_v = x_v.view(num_batch, seq_len, self.args.num_heads, head_dim).transpose(1, 2)
         
         attn_val = torch.matmul(x_q, x_k.transpose(-1, -2)) / (head_dim**0.5)
+        # TODO: Casual mask with image
+        totel_mask_len = self.num_patches + text_token_len
+        mask = self.mask[:, :, :totel_mask_len, :totel_mask_len] == 0
+        attn_val.masked_fill_(mask, float('-inf'))
+        
         attn_scores = F.softmax(attn_val, dim=-1)
         contexual_latent = torch.matmul(attn_scores, x_v)
         contexual_latent = contexual_latent.transpose(1, 2).contiguous().view(num_batch, seq_len, -1)
@@ -139,14 +150,15 @@ class VIT(nn.Module):
         x = self.vitblocks(x)
         final_out = self.output_layer(x)
         if target_text_tokens != None:
-            loss = F.cross_entropy(final_out[:, self.patch_len:, :].reshape(-1, self.args.num_tokens), target_text_tokens.view(-1))
+            logits = final_out[:, self.patch_len-1 :-1, :].reshape(-1, self.args.num_tokens)
+            # TODO: add end token, and -100 on padd token
+            targets = target_text_tokens.view(-1)
+            loss = F.cross_entropy(logits, targets)
         return final_out, loss
     
     def vit_pass(self, x):
-        x = self.vitblocks(x)
-        
+        x = self.vitblocks(x)  
         out = self.output_layer(x)
-       
         return out
         
         
@@ -154,6 +166,8 @@ class VIT(nn.Module):
     def generate(self, img, max_len=None):
         if not max_len:
             max_len = self.args.context_len
+        if len(img.shape) < 4:
+            img.unsqueeze_(0)
         batch_size = img.shape[0]
         img_embed = self.image_input_layer(img)
         curr_input = img_embed
@@ -161,20 +175,29 @@ class VIT(nn.Module):
         for i, _ in enumerate(range(max_len)):
             out = self.vit_pass(curr_input)
             last_layer_out = out[:, -1, :]
-            token_score = F.softmax(last_layer_out, dim=-1)
-            next_tok_indices = torch.argmax(token_score, dim=-1, keepdim=True)
+            next_tok_indices = torch.argmax(last_layer_out, dim=-1, keepdim=True)
             if i == 0:
-                text_tokens = torch.ones(batch_size, 1) * next_tok_indices
+                text_tokens = (torch.ones(batch_size, 1) * next_tok_indices).to(torch.int)
             else: 
-                text_tokens = torch.cat(text_tokens, next_tok_indices, dim=-1)
+                text_tokens = torch.cat((text_tokens, next_tok_indices), dim=-1)
             text_embeds = self.text_input_layer(text_tokens)
-            curr_input = torch.concat(img_embed, text_embeds, dim=1)
-            
-            
-            
-        x = self.input_layer(x)
-        x = self.vitblocks(x)
-        return self.output_layer(x)
+            curr_input = torch.concat((img_embed, text_embeds), dim=1)
+       
+        return tokenizer.batch_decode(text_tokens.tolist())
+
+# def get_mask_val(num_img_patches, text_token_len):
+#     full_mask = torch.ones(num_img_patches+text_token_len, num_img_patches+text_token_len)
+#     causal_mask = torch.tril(full_mask, diagonal=0)
+#     causal_mask[:num_img_patches, :num_img_patches] = 1
+#     return causal_mask.unsqueeze(0).unsqueeze(0)
+
+def get_mask_val(num_img_patches, text_token_len):
+    total = num_img_patches + text_token_len
+    mask = torch.tril(torch.ones(total, total))
+    mask[:num_img_patches, :num_img_patches] = 1  # image fully visible
+    return mask.unsqueeze(0).unsqueeze(0)
+    
+    
         
 # TODO : add attention correctly
 # TODO : may need to add seperate token

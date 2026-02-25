@@ -9,7 +9,7 @@ class Arguments:
     eps: float = 1e-6
     num_heads: int = 8
     context_len: int = 128
-    batch_size: int = 4
+    batch_size: int = 8
     num_workers: int = 0
     pin_memory: bool = False
     load: bool = False
