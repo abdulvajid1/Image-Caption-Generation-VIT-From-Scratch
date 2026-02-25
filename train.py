@@ -27,10 +27,11 @@ def generate_random(model, eval_path="archive/val2017/val2017"):
 def train(model: torch.nn.Module, optimizer: torch.optim.AdamW, dataloader: torch.utils.data.DataLoader, epoch_num: int, global_step):
     progress_bar = tqdm.tqdm(dataloader)
     model.train()
-    for step, (img, text_tokens) in enumerate(progress_bar):
+    for step, (img, text_tokens, attn_mask) in enumerate(progress_bar):
         img = img.to(device)
         text_tokens = text_tokens.to(device)
-        _, loss = model(img, text_tokens)
+        attn_mask = attn_mask.to(device)
+        _, loss = model(img, text_tokens, attn_mask)
         optimizer.zero_grad()
         loss.backward()
         optimizer.step()

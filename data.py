@@ -21,7 +21,7 @@ class ImageCaptionData(Dataset):
         return self.data.shape[0]
     
     def __getitem__(self, index):
-        return transform(self.data[index]['file_name']), (self.data[index]['input_ids'])
+        return transform(self.data[index]['file_name']), (self.data[index]['input_ids']), (self.data[index]['attention_mask']) 
 
 def get_dataloader(device):
     dataloader = DataLoader(dataset=ImageCaptionData(), batch_size=args.batch_size, num_workers=args.num_workers, shuffle=True, pin_memory=args.pin_memory)

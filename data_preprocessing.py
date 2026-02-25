@@ -31,7 +31,8 @@ def main():
     data = load_dataset('csv', data_files='processed_caption.csv')
     data.map(tokenize, batch_size=5000, batched=True)
     
-    data = data.map(tokenize, batched=5000, num_proc=3)
+    data = data.map(tokenize, batched=False, num_proc=3)
+    data.save_to_disk('caption_data')
     
 
 
@@ -49,7 +50,7 @@ def transform(img_path):
 
 
 def tokenize(sample):
-    tokens = tokenizer(sample['caption'], padding='max_length', truncation=True, max_length=32, add_special_tokens=False)
+    tokens = tokenizer(sample['caption']+ "[SEP]", padding='max_length', truncation=True, max_length=args.context_len, add_special_tokens=False)
     return {'input_ids': tokens['input_ids'], "attention_mask": tokens['attention_mask']}
     
 

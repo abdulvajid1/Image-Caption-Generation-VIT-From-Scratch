@@ -13,7 +13,6 @@ class Arguments:
     num_workers: int = 0
     pin_memory: bool = False
     load: bool = False
-    context_len: int = 32
     num_patches: int = 16
     num_tokens: int = 30522
     num_layers: int = 8

@@ -140,7 +140,7 @@ class VIT(nn.Module):
         self.output_layer = VITHead(args)
         self.patch_len = (args.img_size // args.patch_size)**2
     
-    def forward(self, x_img, target_text_tokens:torch.Tensor=None):
+    def forward(self, x_img, target_text_tokens:torch.Tensor=None, attn_mask=None):
         x = self.image_input_layer(x_img)
         loss = None
         if target_text_tokens != None:
@@ -152,6 +152,8 @@ class VIT(nn.Module):
         if target_text_tokens != None:
             logits = final_out[:, self.patch_len-1 :-1, :].reshape(-1, self.args.num_tokens)
             # TODO: add end token, and -100 on padd token
+            target_text_tokens = target_text_tokens.masked_fill(~attn_mask.to(bool), value=-100)
+            
             targets = target_text_tokens.view(-1)
             loss = F.cross_entropy(logits, targets)
         return final_out, loss
