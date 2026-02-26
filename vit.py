@@ -10,7 +10,7 @@ class PositionalEmbedding(nn.Module):
     def __init__(self, args):
         super().__init__()
         self.num_patches = (args.img_size//args.patch_size)**2
-        self.positions = nn.Embedding(args.context_len, args.latent_dim)
+        self.positions = nn.Embedding(self.num_patches, args.latent_dim)
     def forward(self, x):
         pos = self.positions(torch.arange(0, self.num_patches, device=x.device).to(torch.int))[None, :, :]
         return x + pos
@@ -179,9 +179,9 @@ class VIT(nn.Module):
             last_layer_out = out[:, -1, :]
             next_tok_indices = torch.argmax(last_layer_out, dim=-1, keepdim=True)
             if i == 0:
-                text_tokens = (torch.ones(batch_size, 1) * next_tok_indices).to(torch.int)
+                text_tokens = (torch.ones(size=(batch_size, 1), device=img.device) * next_tok_indices).to(torch.int)
             else: 
-                text_tokens = torch.cat((text_tokens, next_tok_indices), dim=-1)
+                text_tokens = torch.cat((text_tokens, next_tok_indices), dim=-1).to(img.device)
             text_embeds = self.text_input_layer(text_tokens)
             curr_input = torch.concat((img_embed, text_embeds), dim=1)
        
