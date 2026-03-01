@@ -17,7 +17,7 @@ def load_model(model, optimizer, global_step=None):
         ckpt_paths = list(Path(args.save_path).glob('*.pt'))
         ckpt = max(ckpt_paths, key=os.path.getatime)
 
-    print(ckpt.as_posix())
+    logger.info(f"Loading model from {ckpt}")
     ckpt_dict = torch.load(ckpt)
     model.load_state_dict(ckpt_dict['model'])
     optimizer.load_state_dict(ckpt_dict['optimizer'])
@@ -33,5 +33,4 @@ def save_model(model,  optimizer, global_step):
     }
     path_to_save = checkpoint_path.joinpath(f'ckpt_{global_step}.pt')
     torch.save(save_dict, path_to_save.as_posix())
-    logger.info('model')
     

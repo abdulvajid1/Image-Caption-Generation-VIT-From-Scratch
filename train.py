@@ -16,8 +16,16 @@ torch.set_float32_matmul_precision('high')
 # device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
 device = 'cuda'
 
-def generate_random(model, eval_path="archive/val2017/val2017"):
-    val_imgs = list(Path(eval_path).glob("*.jpg"))
+def generate_random(model, train=True):
+
+    if train:
+        path = "archive/train2014/train2014"
+        logger.info('Eval from Train image')
+    else:
+        path="archive/val2017/val2017"
+        logger.info('Eval from Train image')
+    
+    val_imgs = list(Path(path).glob('*.jpg'))
     rand_int = random.randint(0, 1000)
     rand_img_path = val_imgs[rand_int]
     logger.info(f"Testing with random image {rand_img_path}")
@@ -34,17 +42,20 @@ def train(model: torch.nn.Module, optimizer: torch.optim.AdamW, dataloader: torc
         text_tokens = text_tokens.to(device)
         attn_mask = attn_mask.to(device)
 
+        optimizer.zero_grad(set_to_none=True)
         with torch.amp.autocast('cuda', dtype=torch.bfloat16):
-            _, loss = model(img, text_tokens, attn_mask)\
-            
-        optimizer.zero_grad()
+            _, loss = model(img, text_tokens, attn_mask)
+        
+        
         loss.backward()
+        torch.nn.utils.clip_grad_norm_(model.parameters(), max_norm=1.0)
         optimizer.step()
         
         if (global_step+1) % eval_step == 0:
             logger.info("Generating Random Sentence")
             model.eval()
             generate_random(model=model)
+            generate_random(model=model, train=False)
             model.train()
         
         progress_bar.set_postfix({
@@ -62,10 +73,10 @@ def train(model: torch.nn.Module, optimizer: torch.optim.AdamW, dataloader: torc
 def main():
     args = Arguments()
     model = VIT(args).to(device)
-    model.compile()
+    # model.compile()
     # Then in your code:
     logger.info("model initialized")
-    optimizer = torch.optim.AdamW(model.parameters(), lr=args.learning_rate)
+    optimizer = torch.optim.AdamW(model.parameters(), lr=args.learning_rate, weight_decay=0.02)
     dataloader = get_dataloader(device)
     global_step = 0
     if args.load:

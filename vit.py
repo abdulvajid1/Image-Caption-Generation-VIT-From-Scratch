@@ -50,7 +50,7 @@ class LayerNorm(nn.Module): # Or RMS Norm
         self.shift = nn.Parameter(torch.zeros(args.latent_dim))
     def forward(self, x: torch.Tensor):
         x_mean = x.mean(dim=-1, keepdim=True)
-        x_std = x.std(dim=-1, keepdim=True)
+        x_std = x.std(dim=-1, keepdim=True, unbiased=False)
         x_norm = (x - x_mean) / (x_std + self.eps)
         return self.scale * x_norm + self.shift
     
@@ -73,14 +73,17 @@ class MultiHeadAttention(nn.Module):
         x_q = self.q_proj(x) # (b, seq, latent_dim)
         x_k = self.k_proj(x)
         x_v = self.v_proj(x)
+
         
+        # (b, seq, d_model) - > (b, head, seq, d_head_dim)
         head_dim = self.args.latent_dim // self.args.num_heads
         x_q = x_q.view(num_batch, seq_len, self.args.num_heads, head_dim).transpose(1, 2)
         x_k = x_k.view(num_batch, seq_len, self.args.num_heads, head_dim).transpose(1, 2)
         x_v = x_v.view(num_batch, seq_len, self.args.num_heads, head_dim).transpose(1, 2)
         
+        # (b, head, seq, seq)
         attn_val = torch.matmul(x_q, x_k.transpose(-1, -2)) / (head_dim**0.5)
-        # TODO: Casual mask with image
+
         totel_mask_len = self.num_patches + text_token_len
         mask = self.mask[:, :, :totel_mask_len, :totel_mask_len] == 0
         attn_val.masked_fill_(mask, float('-inf'))
@@ -115,12 +118,11 @@ class VITBlock(nn.Module):
         self.mlp = MLPLayer(args)
     
     def forward(self, x):
-        x_norm = self.norm1(x)
-        x_attn = self.attention(x_norm)
+        x_attn = self.attention(x)
         x = x + x_attn
-        x_norm = self.norm2(x)
+        x_norm = self.norm1(x)
         x_mlp = self.mlp(x_norm)
-        return x + x_mlp
+        return self.norm2(x_norm + x_mlp)
 
 class VITHead(nn.Module):
     def __init__(self, args):
@@ -155,6 +157,7 @@ class VIT(nn.Module):
             target_text_tokens = target_text_tokens.masked_fill(~attn_mask.to(bool), value=-100)
             
             targets = target_text_tokens.view(-1)
+            # print(logits)
             loss = F.cross_entropy(logits, targets)
         return final_out, loss
     

@@ -30,9 +30,11 @@ def get_dataloader(device):
 
 def transform(img_path):
     transformer = transforms.Compose([
-        transforms.ToTensor(),
         transforms.Resize((args.img_size, args.img_size)),
-        transforms.Normalize([0.5, 0.5, 0.5], [0.5, 0.5, 0.5]),
+        transforms.RandomHorizontalFlip(),
+        transforms.ToTensor(),
+        transforms.Normalize([0.5, 0.5, 0.5], 
+                             [0.5, 0.5, 0.5]),
     ])
     
     
