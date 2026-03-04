@@ -15,25 +15,48 @@ tokenizer = get_tokenizer()
 
 def main():
     
-    if not os.path.exists('processed_captions.csv'):
-        with open('archive/annotations_trainval2014/annotations/captions_train2014.json', 'r') as f:
-            data = json.load(f)
-        images_data = pd.DataFrame(data['images'])
-        annotation_data = pd.DataFrame(data['annotations'])
-        data = annotation_data.merge(images_data, how='left', left_on='image_id', right_on='id')
-        data = data.drop(columns=['id_x', 'license', 'height', 'width', 'date_captured', 'flickr_url','coco_url', 'id_y', 'image_id'])
+    if not os.path.exists('caption_data'):
+        if not os.path.exists('processed_captions.csv'):
+            with open('archive/annotations_trainval2014/annotations/captions_train2014.json', 'r') as f:
+                data = json.load(f)
+            images_data = pd.DataFrame(data['images'])
+            annotation_data = pd.DataFrame(data['annotations'])
+            data = annotation_data.merge(images_data, how='left', left_on='image_id', right_on='id')
+            data = data.drop(columns=['id_x', 'license', 'height', 'width', 'date_captured', 'flickr_url','coco_url', 'id_y', 'image_id'])
+            
+            data['file_name'] = data['file_name'].apply(lambda x: os.path.join('archive/train2014/train2014', x))
+            
+            # Save the processed data
+            data.to_csv('processed_captions.csv', index=False)
+            print("Saved to processed_captions.csv")
         
-        data['file_name'] = data['file_name'].apply(lambda x: os.path.join('archive/train2014/train2014', x))
+        data = load_dataset('csv', data_files='processed_captions.csv')
+        data.map(tokenize, num_proc=4)
         
-        # Save the processed data
-        data.to_csv('processed_captions.csv', index=False)
-        print("Saved to processed_captions.csv")
-    
-    data = load_dataset('csv', data_files='processed_captions.csv')
-    data.map(tokenize, num_proc=4)
-    
-    data = data.map(tokenize, batched=False, num_proc=3)
-    data.save_to_disk('caption_data')
+        data = data.map(tokenize, batched=False, num_proc=3)
+        data.save_to_disk('caption_data')
+
+    if not os.path.exists('caption_val_data'):
+
+        if not os.path.exists('processed_val_captions.csv'):
+            with open('archive/annotations_trainval2017/annotations/captions_val2017.json', 'r') as f:
+                data = json.load(f)
+            images_data = pd.DataFrame(data['images'])
+            annotation_data = pd.DataFrame(data['annotations'])
+            data = annotation_data.merge(images_data, how='left', left_on='image_id', right_on='id')
+            data = data.drop(columns=['id_x', 'license', 'height', 'width', 'date_captured', 'flickr_url','coco_url', 'id_y', 'image_id'])
+            
+            data['file_name'] = data['file_name'].apply(lambda x: os.path.join('archive/val2017/val2017', x))
+            
+            # Save the processed data
+            data.to_csv('processed_val_captions.csv', index=False)
+            print("Saved to processed_val_captions.csv")
+        
+        data = load_dataset('csv', data_files='processed_val_captions.csv')
+        data.map(tokenize, num_proc=4)
+        
+        data = data.map(tokenize, batched=False, num_proc=3)
+        data.save_to_disk('caption_val_data')
     
 
 

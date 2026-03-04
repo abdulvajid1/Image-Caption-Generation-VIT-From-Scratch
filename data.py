@@ -10,7 +10,7 @@ args = Arguments()
 
 
 class ImageCaptionData(Dataset):
-    def __init__(self, path='caption_data'):
+    def __init__(self, path='caption_data_v1'):
         super().__init__()
         self.path = path
         self.data = load_from_disk(path)['train']
@@ -21,10 +21,13 @@ class ImageCaptionData(Dataset):
         return self.data.shape[0]
     
     def __getitem__(self, index):
-        return transform(self.data[index]['file_name']), (self.data[index]['input_ids']), (self.data[index]['attention_mask']) 
+        return transform(self.data[index]['file_name']), (self.data[index]['input_ids']), (self.data[index]['attention_mask']), self.data[index]['file_name']
 
-def get_dataloader(device):
-    dataloader = DataLoader(dataset=ImageCaptionData(), batch_size=args.batch_size, num_workers=args.num_workers, shuffle=True, pin_memory=args.pin_memory)
+def get_dataloader(device, train=True):
+    if train:
+        dataloader = DataLoader(dataset=ImageCaptionData(), batch_size=args.batch_size, num_workers=args.num_workers, shuffle=True, pin_memory=args.pin_memory)
+    else:
+        dataloader = DataLoader(dataset=ImageCaptionData(path='caption_val_data'), num_workers=2, shuffle=False, pin_memory=False)
     return dataloader
 
 

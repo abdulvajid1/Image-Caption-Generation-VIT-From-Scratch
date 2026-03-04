@@ -19,6 +19,6 @@ class Arguments:
     latent_mull: int = 4
     learning_rate: int = 5e-5
     num_epochs: int = 20
-    eval_step: int = 1000
+    eval_step: int = 500
     save_step: int = 1000
     save_path: str = "checkpoints"

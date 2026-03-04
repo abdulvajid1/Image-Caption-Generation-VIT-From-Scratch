@@ -4,10 +4,15 @@ __pycache__/
 *$py.class
 *.csv
 checkpoints
+
 # C extensions
+caption_val_data
 *.so
 archive
 caption_data
+caption_data_v1
+caption_data_v2
+runs
 caption_dataset
 # Distribution / packaging
 .Python

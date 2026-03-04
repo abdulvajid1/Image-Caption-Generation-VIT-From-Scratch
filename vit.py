@@ -11,9 +11,10 @@ class PositionalEmbedding(nn.Module):
         super().__init__()
         self.num_patches = (args.img_size//args.patch_size)**2
         self.positions = nn.Embedding(self.num_patches, args.latent_dim)
+        self.norm = nn.LayerNorm(args.latent_dim)
     def forward(self, x):
         pos = self.positions(torch.arange(0, self.num_patches, device=x.device).to(torch.int))[None, :, :]
-        return x + pos
+        return self.norm(x + pos)
 
 class ImagePatchEmbedding(nn.Module):
     def __init__(self, args):
@@ -34,25 +35,26 @@ class TextEmbedding(nn.Module):
         self.max_tokens = args.context_len
         self.embed = nn.Embedding(num_embeddings=args.num_tokens, embedding_dim=args.latent_dim)
         self.pos_embed = nn.Embedding(num_embeddings=args.context_len, embedding_dim=args.latent_dim)
+        self.norm = nn.LayerNorm(args.latent_dim)
     
     def forward(self, tokens: torch.Tensor):
         x = self.embed(tokens)
         seq_len = x.shape[1]
-        return x + self.pos_embed(torch.arange(seq_len, device=x.device))[None, :seq_len, :]
+        return self.norm(x + self.pos_embed(torch.arange(seq_len, device=x.device))[None, :seq_len, :])
         
         
     
-class LayerNorm(nn.Module): # Or RMS Norm
-    def __init__(self, args):
-        super().__init__()
-        self.eps = args.eps
-        self.scale = nn.Parameter(torch.ones(args.latent_dim))
-        self.shift = nn.Parameter(torch.zeros(args.latent_dim))
-    def forward(self, x: torch.Tensor):
-        x_mean = x.mean(dim=-1, keepdim=True)
-        x_std = x.std(dim=-1, keepdim=True, unbiased=False)
-        x_norm = (x - x_mean) / (x_std + self.eps)
-        return self.scale * x_norm + self.shift
+# class LayerNorm(nn.Module): # Or RMS Norm
+#     def __init__(self, args):
+#         super().__init__()
+#         self.eps = args.eps
+#         self.scale = nn.Parameter(torch.ones(args.latent_dim))
+#         self.shift = nn.Parameter(torch.zeros(args.latent_dim))
+#     def forward(self, x: torch.Tensor):
+#         x_mean = x.mean(dim=-1, keepdim=True)
+#         x_std = x.std(dim=-1, keepdim=True, unbiased=False)
+#         x_norm = (x - x_mean) / (x_std + self.eps)
+#         return self.scale * x_norm + self.shift
     
 class MultiHeadAttention(nn.Module):
     def __init__(self, args):
@@ -65,7 +67,7 @@ class MultiHeadAttention(nn.Module):
         self.q_proj = nn.Linear(in_features=args.latent_dim, out_features=args.latent_dim, bias=False)
         self.k_proj = nn.Linear(in_features=args.latent_dim, out_features=args.latent_dim, bias=False)
         self.v_proj = nn.Linear(in_features=args.latent_dim, out_features=args.latent_dim, bias=False)
-        self.o_proj = nn.Linear(in_features=args.latent_dim, out_features=args.latent_dim, bias=True)
+        self.o_proj = nn.Linear(in_features=args.latent_dim, out_features=args.latent_dim, bias=False)
     
     def forward(self, x: torch.Tensor):
         num_batch, seq_len, _ = x.size()
@@ -101,7 +103,7 @@ class MLPLayer(nn.Module):
         mid_out_features = args.latent_dim*args.latent_mull
         self.ff = nn.Sequential(
             nn.Linear(in_features=args.latent_dim, out_features=mid_out_features),
-            nn.GELU(),
+            nn.GELU('tanh'),
             nn.Linear(in_features=mid_out_features, out_features=args.latent_dim)
         )
     def forward(self, x):
@@ -112,17 +114,21 @@ class VITBlock(nn.Module):
     def __init__(self, args):
         super().__init__()
         self.args = args
-        self.norm1 = LayerNorm(args)
-        self.norm2 = LayerNorm(args)
+        self.norm1 = nn.LayerNorm(args.latent_dim)
+        self.norm2 = nn.LayerNorm(args.latent_dim)
         self.attention = MultiHeadAttention(args)
         self.mlp = MLPLayer(args)
     
     def forward(self, x):
-        x_attn = self.attention(x)
-        x = x + x_attn
-        x_norm = self.norm1(x)
-        x_mlp = self.mlp(x_norm)
-        return self.norm2(x_norm + x_mlp)
+        residual = x
+        x = self.norm1(x)
+        x = self.attention(x)
+        x = x + residual
+        
+        residual = x
+        x = self.norm2(x)
+        x = self.mlp(x)
+        return x + residual
 
 class VITHead(nn.Module):
     def __init__(self, args):
@@ -140,6 +146,7 @@ class VIT(nn.Module):
         self.text_input_layer = TextEmbedding(args)
         self.vitblocks = nn.Sequential(*[VITBlock(args) for _ in range(args.num_layers)])
         self.output_layer = VITHead(args)
+        self.final_norm = nn.LayerNorm(args.latent_dim)
         self.patch_len = (args.img_size // args.patch_size)**2
     
     def forward(self, x_img, target_text_tokens:torch.Tensor=None, attn_mask=None):
@@ -150,7 +157,9 @@ class VIT(nn.Module):
             x = torch.concat((x, text_embeddings), dim=1)
         
         x = self.vitblocks(x)
+        x = self.final_norm(x)
         final_out = self.output_layer(x)
+
         if target_text_tokens != None:
             logits = final_out[:, self.patch_len-1 :-1, :].reshape(-1, self.args.num_tokens)
             # TODO: add end token, and -100 on padd token
@@ -163,6 +172,7 @@ class VIT(nn.Module):
     
     def vit_pass(self, x):
         x = self.vitblocks(x)  
+        x = self.final_norm(x)
         out = self.output_layer(x)
         return out
         
