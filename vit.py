@@ -14,7 +14,7 @@ class PositionalEmbedding(nn.Module):
         self.norm = nn.LayerNorm(args.latent_dim)
     def forward(self, x):
         pos = self.positions(torch.arange(0, self.num_patches, device=x.device).to(torch.int))[None, :, :]
-        return self.norm(x + pos)
+        return x + pos
 
 class ImagePatchEmbedding(nn.Module):
     def __init__(self, args):
@@ -35,12 +35,11 @@ class TextEmbedding(nn.Module):
         self.max_tokens = args.context_len
         self.embed = nn.Embedding(num_embeddings=args.num_tokens, embedding_dim=args.latent_dim)
         self.pos_embed = nn.Embedding(num_embeddings=args.context_len, embedding_dim=args.latent_dim)
-        self.norm = nn.LayerNorm(args.latent_dim)
     
     def forward(self, tokens: torch.Tensor):
         x = self.embed(tokens)
         seq_len = x.shape[1]
-        return self.norm(x + self.pos_embed(torch.arange(seq_len, device=x.device))[None, :seq_len, :])
+        return x + self.pos_embed(torch.arange(seq_len, device=x.device))[None, :seq_len, :]
         
         
     
@@ -56,45 +55,81 @@ class TextEmbedding(nn.Module):
 #         x_norm = (x - x_mean) / (x_std + self.eps)
 #         return self.scale * x_norm + self.shift
     
+# class MultiHeadAttention(nn.Module):
+#     def __init__(self, args):
+#         super().__init__()
+#         self.args = args
+#         self.num_patches = (self.args.img_size//self.args.patch_size)**2
+#         mask = get_mask_val(self.num_patches, args.context_len)
+#         self.register_buffer('mask', mask)
+#         assert args.latent_dim % args.num_heads == 0, "latent dim should be divisible with num heads"
+#         self.q_proj = nn.Linear(in_features=args.latent_dim, out_features=args.latent_dim, bias=False)
+#         self.k_proj = nn.Linear(in_features=args.latent_dim, out_features=args.latent_dim, bias=False)
+#         self.v_proj = nn.Linear(in_features=args.latent_dim, out_features=args.latent_dim, bias=False)
+#         self.o_proj = nn.Linear(in_features=args.latent_dim, out_features=args.latent_dim, bias=False)
+    
+#     def forward(self, x: torch.Tensor):
+#         num_batch, seq_len, _ = x.size()
+#         text_token_len = seq_len - self.num_patches
+#         x_q = self.q_proj(x) # (b, seq, latent_dim)
+#         x_k = self.k_proj(x)
+#         x_v = self.v_proj(x)
+
+        
+#         # (b, seq, d_model) - > (b, head, seq, d_head_dim)
+#         head_dim = self.args.latent_dim // self.args.num_heads
+#         x_q = x_q.view(num_batch, seq_len, self.args.num_heads, head_dim).transpose(1, 2)
+#         x_k = x_k.view(num_batch, seq_len, self.args.num_heads, head_dim).transpose(1, 2)
+#         x_v = x_v.view(num_batch, seq_len, self.args.num_heads, head_dim).transpose(1, 2)
+        
+#         # (b, head, seq, seq)
+#         attn_val = torch.matmul(x_q, x_k.transpose(-1, -2)) / (head_dim**0.5)
+
+#         totel_mask_len = self.num_patches + text_token_len
+#         mask = self.mask[:, :, :totel_mask_len, :totel_mask_len] == 0
+#         attn_val.masked_fill_(mask, float('-inf'))
+        
+#         attn_scores = F.softmax(attn_val, dim=-1)
+#         contexual_latent = torch.matmul(attn_scores, x_v)
+#         contexual_latent = contexual_latent.transpose(1, 2).contiguous().view(num_batch, seq_len, -1)
+        
+#         return self.o_proj(contexual_latent)
+
+import torch
+import torch.nn as nn
+
 class MultiHeadAttention(nn.Module):
     def __init__(self, args):
         super().__init__()
         self.args = args
-        self.num_patches = (self.args.img_size//self.args.patch_size)**2
+
+        self.num_patches = (args.img_size // args.patch_size) ** 2
         mask = get_mask_val(self.num_patches, args.context_len)
-        self.register_buffer('mask', mask)
-        assert args.latent_dim % args.num_heads == 0, "latent dim should be divisible with num heads"
-        self.q_proj = nn.Linear(in_features=args.latent_dim, out_features=args.latent_dim, bias=False)
-        self.k_proj = nn.Linear(in_features=args.latent_dim, out_features=args.latent_dim, bias=False)
-        self.v_proj = nn.Linear(in_features=args.latent_dim, out_features=args.latent_dim, bias=False)
-        self.o_proj = nn.Linear(in_features=args.latent_dim, out_features=args.latent_dim, bias=False)
-    
-    def forward(self, x: torch.Tensor):
-        num_batch, seq_len, _ = x.size()
-        text_token_len = seq_len - self.num_patches
-        x_q = self.q_proj(x) # (b, seq, latent_dim)
-        x_k = self.k_proj(x)
-        x_v = self.v_proj(x)
 
-        
-        # (b, seq, d_model) - > (b, head, seq, d_head_dim)
-        head_dim = self.args.latent_dim // self.args.num_heads
-        x_q = x_q.view(num_batch, seq_len, self.args.num_heads, head_dim).transpose(1, 2)
-        x_k = x_k.view(num_batch, seq_len, self.args.num_heads, head_dim).transpose(1, 2)
-        x_v = x_v.view(num_batch, seq_len, self.args.num_heads, head_dim).transpose(1, 2)
-        
-        # (b, head, seq, seq)
-        attn_val = torch.matmul(x_q, x_k.transpose(-1, -2)) / (head_dim**0.5)
+        # pytorch expects (seq, seq) or (batch*num_heads, seq, seq)
+        self.register_buffer("mask", mask[0,0])
 
-        totel_mask_len = self.num_patches + text_token_len
-        mask = self.mask[:, :, :totel_mask_len, :totel_mask_len] == 0
-        attn_val.masked_fill_(mask, float('-inf'))
-        
-        attn_scores = F.softmax(attn_val, dim=-1)
-        contexual_latent = torch.matmul(attn_scores, x_v)
-        contexual_latent = contexual_latent.transpose(1, 2).contiguous().view(num_batch, seq_len, -1)
-        
-        return self.o_proj(contexual_latent)
+        self.attn = nn.MultiheadAttention(
+            embed_dim=args.latent_dim,
+            num_heads=args.num_heads,
+            dropout=0.1,
+            bias=False,
+            batch_first=True
+        )
+
+    def forward(self, x):
+        seq_len = x.size(1)
+
+        attn_mask = self.mask[:seq_len, :seq_len] == 0
+
+        out, _ = self.attn(
+            x,
+            x,
+            x,
+            attn_mask=attn_mask
+        )
+
+        return out
 
 
 class MLPLayer(nn.Module):
@@ -148,7 +183,25 @@ class VIT(nn.Module):
         self.output_layer = VITHead(args)
         self.final_norm = nn.LayerNorm(args.latent_dim)
         self.patch_len = (args.img_size // args.patch_size)**2
+
+        # Initialize weights
+        self.apply(self._init_weights)
     
+    def _init_weights(self, module):
+
+        if isinstance(module, nn.Linear):
+            torch.nn.init.trunc_normal_(module.weight, std=0.02)
+
+            if module.bias is not None:
+                torch.nn.init.zeros_(module.bias)
+
+        elif isinstance(module, nn.Embedding):
+            torch.nn.init.trunc_normal_(module.weight, std=0.02)
+
+        elif isinstance(module, nn.LayerNorm):
+            torch.nn.init.ones_(module.weight)
+            torch.nn.init.zeros_(module.bias)
+
     def forward(self, x_img, target_text_tokens:torch.Tensor=None, attn_mask=None):
         x = self.image_input_layer(x_img)
         loss = None
